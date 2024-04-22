@@ -1,88 +1,57 @@
-/*
-  Capitulo 65 de Arduino desde cero en Español.
-  Visualizacion por monitor serie de las lecturas del MPU6050 para yaw, pitch y roll.
-  Intercala texto si el pitch es mayor a 10 grados o menor a -10 grados a modo de ejemplo
-  para tomar una accion.
-  Requiere librerias I2cdev y Simple_MPU6050
+#include <Wire.h>
+#include <LiquidCrystal.h>
+#include "Simple_MPU6050.h"
 
-  Codigo basado en el programa de ejemplo incluido en la libreria Simple_MPU6050
+#define MPU6050_ADDRESS_AD0_LOW 0x68
+Simple_MPU6050 mpu;
+#define OFFSETS -5114, 484, 1030, 46, -14, 6
 
-  https://www.youtube.com/c/BitwiseAr
-  Autor: bitwiseAr  
+// Configurar el pin de la luz de fondo
+const int backlightPin = 2;
 
-*/
+LiquidCrystal lcd(12, 11, 5, 4, 3, 10); // Asume que has cambiado D7 al pin 10
 
-#include "Simple_MPU6050.h"         // incluye libreria Simple_MPU6050
-#define MPU6050_ADDRESS_AD0_LOW     0x68      // direccion I2C con AD0 en LOW o sin conexion
-#define MPU6050_ADDRESS_AD0_HIGH    0x69      // direccion I2C con AD0 en HIGH
-#define MPU6050_DEFAULT_ADDRESS     MPU6050_ADDRESS_AD0_LOW // por defecto AD0 en LOW
-
-Simple_MPU6050 mpu;       // crea objeto con nombre mpu
-// ENABLE_MPU_OVERFLOW_PROTECTION();    // activa proteccion, ya no se requiere
-
-#define OFFSETS  -5114,     484,    1030,      46,     -14,       6  // Colocar valores personalizados
-
-#define spamtimer(t) for (static uint32_t SpamTimer; (uint32_t)(millis() - SpamTimer) >= (t); SpamTimer = millis())
-// spamtimer funcion para generar demora al escribir en monitor serie sin usar delay()
-
-#define printfloatx(Name,Variable,Spaces,Precision,EndTxt) print(Name); {char S[(Spaces + Precision + 3)];Serial.print(F(" ")); Serial.print(dtostrf((float)Variable,Spaces,Precision ,S));}Serial.print(EndTxt);
-// printfloatx funcion para mostrar en monitor serie datos para evitar el uso se multiples print()
-
-// mostrar_valores funcion que es llamada cada vez que hay datos disponibles desde el sensor
-void mostrar_valores (int16_t *gyro, int16_t *accel, int32_t *quat, uint32_t *timestamp) {  
-  uint8_t SpamDelay = 100;      // demora para escribir en monitor serie de 100 mseg
-  Quaternion q;         // variable necesaria para calculos posteriores
-  VectorFloat gravity;        // variable necesaria para calculos posteriores
-  float ypr[3] = { 0, 0, 0 };     // array para almacenar valores de yaw, pitch, roll
-  float xyz[3] = { 0, 0, 0 };     // array para almacenar valores convertidos a grados de yaw, pitch, roll
-  spamtimer(SpamDelay) {      // si han transcurrido al menos 100 mseg entonces proceder
-    mpu.GetQuaternion(&q, quat);    // funcion para obtener valor para calculo posterior
-    mpu.GetGravity(&gravity, &q);   // funcion para obtener valor para calculo posterior
-    mpu.GetYawPitchRoll(ypr, &q, &gravity); // funcion obtiene valores de yaw, ptich, roll
-    mpu.ConvertToDegrees(ypr, xyz);   // funcion convierte a grados sexagesimales
-    Serial.printfloatx(F("Yaw")  , xyz[0], 9, 4, F(",   "));  // muestra en monitor serie rotacion de eje Z, yaw
-    Serial.printfloatx(F("Pitch"), xyz[1], 9, 4, F(",   "));  // muestra en monitor serie rotacion de eje Y, pitch
-    Serial.printfloatx(F("Roll") , xyz[2], 9, 4, F(",   "));  // muestra en monitor serie rotacion de eje X, roll
-    Serial.println();       // salto de linea
-    if ( xyz[1] > 10.0 ){     // si el pitch es mayor a 10 grados
-      Serial.println("Nariz arriba");   // muestra texto
-    }
-      else if ( xyz[1] < -10.0){    // si el pitch es menor a -10 grados
-        Serial.println("Nariz abajo");    // muestra texto
-      }
-  }
+void mostrar_valores(int16_t *gyro, int16_t *accel, int32_t *quat, uint32_t *timestamp) {
+  Quaternion q;
+  VectorFloat gravity;
+  float ypr[3] = {0, 0, 0};
+  float xyz[3] = {0, 0, 0};
+  mpu.GetQuaternion(&q, quat);
+  mpu.GetGravity(&gravity, &q);
+  mpu.GetYawPitchRoll(ypr, &q, &gravity);
+  mpu.ConvertToDegrees(ypr, xyz);
+  
+  // Actualiza la pantalla LCD con los nuevos valores
+  lcd.clear(); // Limpia la pantalla antes de cada actualización
+  lcd.setCursor(0, 0); // Primera fila
+  lcd.print("Yaw: ");
+  lcd.print(xyz[0], 2);
+  lcd.setCursor(0, 1); // Segunda fila
+  lcd.print("Pitch: ");
+  lcd.print(xyz[1], 2);
 }
 
 void setup() {
-  uint8_t val;
-#if I2CDEV_IMPLEMENTATION == I2CDEV_ARDUINO_WIRE  // activacion de bus I2C a 400 Khz
+  pinMode(backlightPin, OUTPUT); // Configura el pin de la luz de fondo como salida
+  lcd.begin(16, 2); // Inicializa la pantalla LCD con el número de columnas y filas
   Wire.begin();
   Wire.setClock(400000);
-#elif I2CDEV_IMPLEMENTATION == I2CDEV_BUILTIN_FASTWIRE
-  Fastwire::setup(400, true);
-#endif
-  
-  Serial.begin(115200);     // inicializacion de monitor serie a 115200 bps
-  while (!Serial);      // espera a enumeracion en caso de modelos con USB nativo
-  Serial.println(F("Inicio:"));   // muestra texto estatico
-#ifdef OFFSETS                // si existen OFFSETS
-  Serial.println(F("Usando Offsets predefinidos"));     // texto estatico
-  mpu.SetAddress(MPU6050_ADDRESS_AD0_LOW).load_DMP_Image(OFFSETS);  // inicializacion de sensor
-
-#else                   // sin no existen OFFSETS
-  Serial.println(F(" No se establecieron Offsets, haremos unos nuevos.\n" // muestra texto estatico
-                   " Colocar el sensor en un superficie plana y esperar unos segundos\n"
-                   " Colocar los nuevos Offsets en #define OFFSETS\n"
-                   " para saltar la calibracion inicial \n"
-                   " \t\tPresionar cualquier tecla y ENTER"));
-  while (Serial.available() && Serial.read());    // lectura de monitor serie
-  while (!Serial.available());        // si no hay espera              
-  while (Serial.available() && Serial.read());    // lecyura de monitor serie
-  mpu.SetAddress(MPU6050_ADDRESS_AD0_LOW).CalibrateMPU().load_DMP_Image();  // inicializacion de sensor
-#endif 
-  mpu.on_FIFO(mostrar_valores);   // llamado a funcion mostrar_valores si memoria FIFO tiene valores
+  Serial.begin(115200);
+  while (!Serial);
+  Serial.println(F("Inicio:"));
+  mpu.SetAddress(MPU6050_ADDRESS_AD0_LOW).load_DMP_Image(OFFSETS);
+  mpu.on_FIFO(mostrar_valores);
 }
 
+unsigned long lastToggleTime = 0;
+const long toggleInterval = 150; // Intervalo para encender/apagar la luz de fondo en milisegundos
+
 void loop() {
-  mpu.dmp_read_fifo();    // funcion que evalua si existen datos nuevos en el sensor y llama
-}       // a funcion mostrar_valores si es el caso
+  mpu.dmp_read_fifo();
+  
+  // Encender/apagar la luz de fondo cada 1000 ms
+  if (millis() - lastToggleTime >= toggleInterval) {
+    digitalWrite(backlightPin, !digitalRead(backlightPin)); // Cambia el estado de la luz de fondo
+    lastToggleTime = millis();
+  }
+}
